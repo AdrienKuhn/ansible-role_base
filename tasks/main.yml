@@ -1,0 +1,207 @@
+---
+# tasks file for base
+
+##
+# Updates
+##
+
+- name: Ensure distribution is up-to-date
+  become: yes
+  apt:
+    update_cache=yes
+    upgrade=yes
+    cache_valid_time=1800
+  register: apt_output
+  tags:
+    - base
+    - update
+
+- debug:
+    msg="{{ apt_output.stdout_lines }}"
+  tags:
+    - base
+    - update
+
+
+##
+# Base packages
+##
+
+- name: Ensure base packages are installed
+  become: yes
+  apt:
+    pkg={{ item }}
+    update_cache=yes
+    state=latest
+  with_items: "{{ default_packages }}"
+  tags: base
+
+##
+# IPv6
+##
+
+- name: Ensure IPv6 is disabled
+  become: yes
+  sysctl:
+    name={{ item }}
+    value=1
+    state=present
+  with_items:
+    - net.ipv6.conf.all.disable_ipv6
+    - net.ipv6.conf.default.disable_ipv6
+    - net.ipv6.conf.lo.disable_ipv6
+    - net.ipv6.conf.eth0.disable_ipv6
+  when: ipv6|bool == false
+  tags:
+    - base
+    - ipv6
+
+- name: Ensure IPv6 is enabled
+  become: yes
+  sysctl:
+    name={{ item }}
+    value=1
+    state=absent
+  with_items:
+    - net.ipv6.conf.all.disable_ipv6
+    - net.ipv6.conf.default.disable_ipv6
+    - net.ipv6.conf.lo.disable_ipv6
+    - net.ipv6.conf.eth0.disable_ipv6
+  when: ipv6|bool == true
+  tags:
+    - base
+    - ipv6
+
+##
+# Locales
+##
+
+- name: Ensure locales are configured
+  become: yes
+  locale_gen:
+    name=en_CA.UTF-8
+    state=present
+  tags:
+    - base
+    - locales
+
+##
+# Date & Time
+##
+
+- name: Ensure Timezone is configured to {{ timezone }}
+  become: yes
+  timezone:
+    name={{ timezone }}
+  tags:
+    - base
+    - datetime
+
+- name: Ensure NTP is installed
+  become: yes
+  apt:
+    pkg={{ item }}
+    state=latest
+  with_items:
+    - ntp
+    - ntpdate
+  tags:
+    - base
+    - datetime
+
+- name: Ensure NTP is configured
+  become: yes
+  template:
+    src=ntp.conf.j2
+    dest=/etc/ntp.conf
+  notify: Restart NTP
+  tags:
+    - base
+    - datetime
+
+- name: Ensure NTP is running and enabled
+  become: yes
+  service:
+    name=ntp
+    enabled=yes
+    state=started
+  tags:
+    - base
+    - datetime
+
+##
+# SWAP
+##
+
+- name: Ensure Swapfile is available
+  become: yes
+  command:
+    dd if=/dev/zero of={{ swap_path }} bs={{ dd_bs_size_mb }}M count={{ swap_count }} creates={{ swap_path }}
+  register: write_swapfile
+  tags:
+    - base
+    - swap
+
+- name: Ensure Swapfile has correct permissions
+  become: yes
+  file:
+    path={{ swap_path }}
+    mode=600
+  tags:
+    - base
+    - swap
+
+- name: Ensure Swapfile is builded
+  become: yes
+  command:
+    mkswap {{ swap_path }}
+  register: create_swapfile
+  when: write_swapfile.changed
+  tags:
+    - base
+    - swap
+
+- name: Ensure Swapfile is enabled
+  become: yes
+  command:
+    swapon {{ swap_path }}
+  when: create_swapfile.changed
+  tags:
+    - base
+    - swap
+
+- name: Ensure Swapfile is referenced in /etc/fstab
+  become: yes
+  lineinfile:
+    dest=/etc/fstab
+    line="{{ swap_path }}   none    swap    sw    0   0"
+    state=present
+  tags:
+    - base
+    - swap
+
+- name: Ebsure swappiness is configured
+  become: yes
+  lineinfile:
+    dest=/etc/sysctl.conf
+    line="vm.swappiness = {{ swappiness }}"
+    regexp="^vm.swappiness[\s]?="
+    state=present
+  notify: Reload Swap
+  when: swappiness != false
+  tags:
+    - base
+    - swap
+
+- name: Ensure vm.vfs_cache_pressure is configured
+  become: yes
+  lineinfile:
+    dest=/etc/sysctl.conf
+    line="vm.vfs_cache_pressure = {{ vfs_cache_pressure }}"
+    regexp="^vm.vfs_cache_pressure[\s]?="
+    state=present
+  when: vfs_cache_pressure != false
+  notify: Reload Swap
+  tags:
+    - base
+    - swap

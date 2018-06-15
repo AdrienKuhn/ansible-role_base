@@ -1,0 +1,10 @@
+---
+# handlers file for base
+
+- name: Restart NTP
+  become: yes
+  service: name=ntp state=restarted
+
+- name: Reload Swap
+  become: yes
+  shell: 'swapoff -a && swapon -a'
